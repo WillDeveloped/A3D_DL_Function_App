@@ -3,7 +3,7 @@ const { app } = require('@azure/functions');
 app.http('Datalake', {
     methods: ['GET', 'POST'],
     authLevel: 'anonymous',
-    route:'Testfunction.js',
+    route:'functions/Testfunction.js',
     handler: async (request, context) => {
         context.log(`Http function processed request for url "${request.url}"`);
 
