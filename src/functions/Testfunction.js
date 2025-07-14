@@ -1,47 +1,67 @@
 const { BlobServiceClient } = require("@azure/storage-blob");
+const { v4: uuidv4 } = require("uuid");
 
-// Load connection string from environment
+
 const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
 const containerName = "push-messages";
 
+
 module.exports = async function (context, req) {
-  try {
-    context.log("📥 Received a push message request.");
+    try {
+        context.log("📨 Received a push message request.");
 
-    // Validate and parse the incoming message
-    const message = req.body;
-    if (!message || !message.id) {
-      context.log("❌ Invalid message format: missing 'id'.");
-      context.res = {
-        status: 400,
-        body: "Message must contain a valid 'id'."
-      };
-      return;
+
+        // Read and validate the request body
+        const message = req.body;
+        if (!message || typeof message !== "object") {
+            context.log("❌ Invalid or missing JSON body.");
+            context.res = {
+                status: 400,
+                body: "Request body must be valid JSON."
+            };
+            return;
+        }
+
+
+        // Determine folder and generate a unique filename
+        const folder = req.query.folder || "default";
+        const blobName = `${folder}/json_${uuidv4()}.json`;
+
+
+        // Initialize Blob client
+        const blobServiceClient = BlobServiceClient.fromConnectionString(connectionString);
+        const containerClient = blobServiceClient.getContainerClient(containerName);
+
+
+        // Ensure container exists
+        const exists = await containerClient.exists();
+        if (!exists) {
+            context.log(`ℹ️ Container '${containerName}' does not exist. Creating it.`);
+            await containerClient.create();
+        }
+
+
+        // Upload the blob
+        const blobClient = containerClient.getBlockBlobClient(blobName);
+        const messageString = JSON.stringify(message, null, 2);
+        await blobClient.upload(messageString, Buffer.byteLength(messageString), { overwrite: true });
+
+
+        context.log(`✅ Message stored as blob: ${blobClient.url}`);
+        context.res = {
+            status: 201,
+            body: {
+                message: "JSON stored successfully",
+                blobName: blobName,
+                blobUrl: `${containerClient.url}/${blobName}`
+            }
+        };
+    } catch (error) {
+        context.log(`🔥 Error storing JSON: ${error.message}`);
+        context.res = {
+            status: 500,
+            body: `Failed to store JSON: ${error.message}`
+        };
     }
-
-    // Create BlobServiceClient and ensure container exists
-    const blobServiceClient = BlobServiceClient.fromConnectionString(connectionString);
-    const containerClient = blobServiceClient.getContainerClient(containerName);
-    await containerClient.createIfNotExists({ access: "container" });
-
-    // Generate blob name and upload
-    const blobName = `${message.id}.json`;
-    const blobClient = containerClient.getBlockBlobClient(blobName);
-    const jsonMessage = JSON.stringify(message, null, 2);
-
-    await blobClient.upload(jsonMessage, Buffer.byteLength(jsonMessage), { overwrite: true });
-
-    context.log(`✅ Uploaded blob: ${blobName}`);
-
-    context.res = {
-      status: 200,
-      body: `Message ${message.id} stored successfully.`
-    };
-  } catch (error) {
-    context.log(`🚨 Error storing message: ${error.message}`);
-    context.res = {
-      status: 500,
-      body: "Failed to store message"
-    };
-  }
 };
+
